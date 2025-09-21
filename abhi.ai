@@ -1,0 +1,61 @@
+import sqlite3
+from google.cloud import aiplatform
+
+# Connect to your SQLite database (adapt if needed)
+conn = sqlite3.connect('factchecker.db')
+cursor = conn.cursor()
+
+# Create table if not exists
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS fact_checks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    claim TEXT UNIQUE,
+    verdict TEXT,
+    explanation TEXT,
+    image_url TEXT,
+    video_url TEXT
+)
+''')
+conn.commit()
+
+# Query database for existing fact check
+def query_database(claim):
+    cursor.execute('SELECT verdict, explanation, image_url, video_url FROM fact_checks WHERE claim = ?', (claim,))
+    return cursor.fetchone()
+
+# Store fact check in database
+def store_in_database(claim, verdict, explanation, image_url=None, video_url=None):
+    cursor.execute('''
+    INSERT OR REPLACE INTO fact_checks (claim, verdict, explanation, image_url, video_url)
+    VALUES (?, ?, ?, ?, ?)
+    ''', (claim, verdict, explanation, image_url, video_url))
+    conn.commit()
+
+# AI verification using Vertex AI
+def ai_verify_claim(claim):
+    prompt = f"Verify the claim: '{claim}'. Is it true or false? Provide a clear explanation and evidence."
+
+    # Initialize Vertex AI client
+    client = aiplatform.gapic.PredictionServiceClient(
+        client_options={"api_endpoint": "us-central1-aiplatform.googleapis.com"}
+    )
+    endpoint = client.endpoint_path("your-project-id", "us-central1", "your-model-endpoint-id")
+
+    instances = [{"content": prompt}]
+    response = client.predict(endpoint=endpoint, instances=instances)
+    prediction = response.predictions[0]  # adjust based on model response format
+
+    # Extract the result from prediction and return (adjust parsing as needed)
+    return prediction
+
+if __name__ == "__main__":
+    test_claim = "The Earth is flat."
+    # Check local DB first
+    db_result = query_database(test_claim)
+    if db_result:
+        print("From DB:", db_result)
+    else:
+        # Call Vertex AI for verification
+        result = ai_verify_claim(test_claim)
+        print("AI Verification Result:", result)
+        # Optionally store result in DB here with store_in_database(...)
